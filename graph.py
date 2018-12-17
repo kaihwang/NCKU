@@ -5,6 +5,7 @@ from igraph import Graph, ADJ_UNDIRECTED, VertexClustering
 from itertools import combinations
 import os
 import glob
+import pandas as pd
 
 def matrix_to_igraph(matrix,cost,binary=False,check_tri=True,interpolation='midpoint',normalize=False,mst=False,test_matrix=True):
 	"""
@@ -186,74 +187,132 @@ def cal_modularity_w_imposed_community(M, CI):
 
 
 
-### loop through subjects, 1 to 156
+def cal_indiv_graph():
+	'''loop through subjects and get PC/WMD/Q/eG/CI'''
 
-gordon_files = glob.glob("Data/*Gordon*.netcc")
-yeo_files = glob.glob("Data/*Yeo*.netcc")
-files = gordon_files + yeo_files
+	### loop through subjects, 1 to 156
 
-for f in files:
-	
-	if f in gordon_files:		
-		cmd = "cat %s | tail -n 352 > Data/test" %f 
-		roi='gordon'
-	
-	if f in yeo_files:
-		cmd = "cat %s | tail -n 422 > Data/test" %f #422 for Yeo
-		roi='yeo'
+	gordon_files = glob.glob("Data/*Gordon*.netcc")
+	yeo_files = glob.glob("Data/*Yeo*.netcc")
+	files = gordon_files + yeo_files
 
-	sub = f[5:8]
-	os.system(cmd)
-
-
-	# load matrix
-	matrix = np.genfromtxt('Data/test',delimiter='\t',dtype=None)
-	matrix[np.isnan(matrix)] = 0.0  
-	matrix[matrix<0]=0.0
-
-
-	# step through costs, do infomap, return final infomap across cost
-	max_cost = .15
-	min_cost = .01
-
-	partition = ave_consensus_costs_parition(matrix, min_cost, max_cost)
-	partition = np.array(partition) + 1
-
-	# calculate modularity, efficiency?
-	Q = cal_modularity_w_imposed_community(matrix,partition)
-	Eg = bct.efficiency_wei(matrix)
-
-	# import thresholded matrix to BCT, import partition, run WMD/PC
-	PCs = np.zeros((len(np.arange(min_cost, max_cost+0.01, 0.01)), matrix.shape[0]))
-	WMDs = np.zeros((len(np.arange(min_cost, max_cost+0.01, 0.01)), matrix.shape[0]))
-
-	for i, cost in enumerate(np.arange(min_cost, max_cost, 0.01)):
+	for f in files:
 		
-		tmp_matrix = threshold(matrix.copy(), cost)
+		if f in gordon_files:		
+			cmd = "cat %s | tail -n 352 > Data/test" %f 
+			roi='gordon'
 		
-		#PC
-		PCs[i,:] = bct.participation_coef(tmp_matrix, partition)
-		#WMD
-		WMDs[i,:] = bct.module_degree_zscore(matrix, partition)
+		if f in yeo_files:
+			cmd = "cat %s | tail -n 422 > Data/test" %f #422 for Yeo
+			roi='yeo'
 
-	PC = np.mean(PCs, axis=0) # ave across thresholds
-	WMD = np.mean(WMDs, axis=0)
+		sub = f[5:8]
+		os.system(cmd)
 
+
+		# load matrix
+		matrix = np.genfromtxt('Data/test',delimiter='\t',dtype=None)
+		matrix[np.isnan(matrix)] = 0.0  
+		matrix[matrix<0]=0.0
+
+
+		# step through costs, do infomap, return final infomap across cost
+		max_cost = .15
+		min_cost = .01
+
+		partition = ave_consensus_costs_parition(matrix, min_cost, max_cost)
+		partition = np.array(partition) + 1
+
+		# calculate modularity, efficiency?
+		Q = cal_modularity_w_imposed_community(matrix,partition)
+		Eg = bct.efficiency_wei(matrix)
+
+		# import thresholded matrix to BCT, import partition, run WMD/PC
+		PCs = np.zeros((len(np.arange(min_cost, max_cost+0.01, 0.01)), matrix.shape[0]))
+		WMDs = np.zeros((len(np.arange(min_cost, max_cost+0.01, 0.01)), matrix.shape[0]))
+
+		for i, cost in enumerate(np.arange(min_cost, max_cost, 0.01)):
+			
+			tmp_matrix = threshold(matrix.copy(), cost)
+			
+			#PC
+			PCs[i,:] = bct.participation_coef(tmp_matrix, partition)
+			#WMD
+			WMDs[i,:] = bct.module_degree_zscore(matrix, partition)
+
+		PC = np.mean(PCs, axis=0) # ave across thresholds
+		WMD = np.mean(WMDs, axis=0)
+
+		
+		fn = "Graph_output/%s_%s_PC" %(sub, roi)
+		np.savetxt(fn, PC)
+
+		fn = "Graph_output/%s_%s_WMD" %(sub, roi)
+		np.savetxt(fn, WMD)
+		
+		fn = "Graph_output/%s_%s_Q" %(sub, roi)
+		np.savetxt(fn, np.array(Q, ndmin=1))
+
+		fn = "Graph_output/%s_%s_Eg" %(sub, roi)
+		np.savetxt(fn, np.array(Eg, ndmin=1))
+
+		fn = "Graph_output/%s_%s_Partition" %(sub, roi)
+		np.savetxt(fn, partition)
+
+
+
+
+if __name__ == "__main__":
 	
-	fn = "Graph_output/%s_%s_PC" %(sub, roi)
-	np.savetxt(fn, PC)
+	cal_indiv_graph()
 
-	fn = "Graph_output/%s_%s_WMD" %(sub, roi)
-	np.savetxt(fn, WMD)
-	
-	fn = "Graph_output/%s_%s_Q" %(sub, roi)
-	np.savetxt(fn, np.array(Q, ndmin=1))
+	ROI_metrics = ['gordon_PC', 'gordon_WMD', 'yeo_PC', 'yeo_WMD']
+	Graph_metrics = ['gordon_Q', 'yeo_Q', 'gordon_Eg', 'yeo_Eg']
+	metrics = ROI_metrics + Graph_metrics
 
-	fn = "Graph_output/%s_%s_Eg" %(sub, roi)
-	np.savetxt(fn, np.array(Eg, ndmin=1))
+	for metric in metrics:
+		fn = "*Graph_output/*%s" %metric
+		files = glob.glob(fn)
 
-	fn = "Graph_output/%s_%s_Partition" %(sub, roi)
-	np.savetxt(fn, partition)
+		df = pd.DataFrame()
+
+		for f in files:
+			tdf = pd.DataFrame()
+			sub = f[13:16]
+			
+			if metric in ROI_metrics:
+				tdf[metric] = np.loadtxt(f)
+				tdf['ROI'] = np.arange(1, len(tdf)+1)
+
+			if metric in Graph_metrics:
+				tdf.loc[0, metric] =  np.loadtxt(f)
+
+			tdf['Subject']= sub
+
+			df = df.append(tdf)
+			df.to_csv(metric+'.csv')
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
